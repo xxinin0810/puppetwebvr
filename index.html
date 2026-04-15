@@ -479,83 +479,113 @@
         }
 
         /**
-         * 根据牵引环位置更新木偶关节
+         * 根据牵引环位置更新木偶部位位置
+         * 牵线木偶原理：牵引环在哪里，木偶部位就被"拉"到哪里
          */
         updatePuppetJoints() {
-          // 头部：跟随头部牵引环
-          const headRingWorld = new THREE.Vector3();
-          this.headRing.getWorldPosition(headRingWorld);
-          const headTarget = new THREE.Vector3();
-          this.headPivot.getWorldPosition(headTarget);
+          // 先更新一次 world matrix，确保位置正确
+          this.puppet.updateMatrixWorld(true);
           
-          // 计算头部应该朝向的方向
-          const headDir = headRingWorld.clone().sub(headTarget).normalize();
-          if (headDir.length() > 0.01) {
-            // 简单的朝向控制
-            this.headPivot.lookAt(headRingWorld);
+          // ========== 头部 ==========
+          // 头部牵引环控制头部倾斜
+          const headRingPos = this.headRing.position;
+          const headDefaultY = this.puppet.position.y + 0.35;
+          
+          // 计算偏移量（只关心水平方向的偏移）
+          const headOffsetX = headRingPos.x - this.puppet.position.x;
+          const headOffsetZ = headRingPos.z - this.puppet.position.z;
+          
+          // 应用到头部旋转（限幅）
+          this.headPivot.rotation.z = THREE.MathUtils.clamp(headOffsetX * 5, -0.8, 0.8);
+          this.headPivot.rotation.x = THREE.MathUtils.clamp(-headOffsetZ * 5, -0.8, 0.8);
+
+          // ========== 左手 ==========
+          const leftHandRingPos = this.leftHandRing.position;
+          
+          // 肩膀相对于木偶的局部位置
+          const leftShoulderLocal = new THREE.Vector3(-0.08, 0.15, 0);
+          const leftShoulderWorld = leftShoulderLocal.clone().add(this.puppet.position);
+          
+          // 方向向量：从肩膀到牵引环
+          const leftArmDir = leftHandRingPos.clone().sub(leftShoulderWorld);
+          const leftArmLength = leftArmDir.length();
+          
+          if (leftArmLength > 0.02) {
+            leftArmDir.normalize();
+            
+            // 计算旋转角度
+            const pitch = Math.atan2(leftArmDir.y, Math.sqrt(leftArmDir.x * leftArmDir.x + leftArmDir.z * leftArmDir.z));
+            const yaw = Math.atan2(-leftArmDir.x, -leftArmDir.z);
+            
+            this.leftShoulderPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
+            
+            // 肘部弯曲
+            const maxArmReach = 0.22;
+            const elbowBend = Math.min(leftArmLength / maxArmReach, 1.2);
+            this.leftElbowPivot.rotation.x = -elbowBend * Math.PI * 0.35;
           }
 
-          // 左手：牵引环移动时，手臂跟随
-          const leftHandWorld = new THREE.Vector3();
-          this.leftHandRing.getWorldPosition(leftHandWorld);
-          this.updateArmIK(this.leftShoulderPivot, this.leftElbowPivot, this.leftWristPivot, leftHandWorld);
-
-          // 右手
-          const rightHandWorld = new THREE.Vector3();
-          this.rightHandRing.getWorldPosition(rightHandWorld);
-          this.updateArmIK(this.rightShoulderPivot, this.rightElbowPivot, this.rightWristPivot, rightHandWorld);
-
-          // 左脚
-          const leftFootWorld = new THREE.Vector3();
-          this.leftFootRing.getWorldPosition(leftFootWorld);
-          this.updateLegIK(this.leftHipPivot, this.leftKneePivot, this.leftAnklePivot, leftFootWorld);
-
-          // 右脚
-          const rightFootWorld = new THREE.Vector3();
-          this.rightFootRing.getWorldPosition(rightFootWorld);
-          this.updateLegIK(this.rightHipPivot, this.rightKneePivot, this.rightAnklePivot, rightFootWorld);
-        }
-
-        /**
-         * 简化的手臂IK（逆向运动学）
-         */
-        updateArmIK(shoulder, elbow, wrist, targetPos) {
-          const shoulderWorld = new THREE.Vector3();
-          shoulder.getWorldPosition(shoulderWorld);
+          // ========== 右手 ==========
+          const rightHandRingPos = this.rightHandRing.position;
+          const rightShoulderLocal = new THREE.Vector3(0.08, 0.15, 0);
+          const rightShoulderWorld = rightShoulderLocal.clone().add(this.puppet.position);
           
-          // 计算从肩膀到目标的方向
-          const dir = targetPos.clone().sub(shoulderWorld);
-          const distance = dir.length();
+          const rightArmDir = rightHandRingPos.clone().sub(rightShoulderWorld);
+          const rightArmLength = rightArmDir.length();
           
-          if (distance > 0.05) {
-            // 让肩膀朝向目标
-            shoulder.lookAt(targetPos);
-            shoulder.rotateX(Math.PI / 2);
+          if (rightArmLength > 0.02) {
+            rightArmDir.normalize();
             
-            // 根据距离调整肘部弯曲
-            const maxReach = 0.22; // 上臂+前臂长度
-            const bendRatio = Math.min(1, distance / maxReach);
-            elbow.rotation.x = -bendRatio * Math.PI * 0.5;
+            const pitch = Math.atan2(rightArmDir.y, Math.sqrt(rightArmDir.x * rightArmDir.x + rightArmDir.z * rightArmDir.z));
+            const yaw = Math.atan2(-rightArmDir.x, -rightArmDir.z);
+            
+            this.rightShoulderPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
+            
+            const maxArmReach = 0.22;
+            const elbowBend = Math.min(rightArmLength / maxArmReach, 1.2);
+            this.rightElbowPivot.rotation.x = -elbowBend * Math.PI * 0.35;
           }
-        }
 
-        /**
-         * 简化的腿部IK
-         */
-        updateLegIK(hip, knee, ankle, targetPos) {
-          const hipWorld = new THREE.Vector3();
-          hip.getWorldPosition(hipWorld);
+          // ========== 左脚 ==========
+          const leftFootRingPos = this.leftFootRing.position;
+          const leftHipLocal = new THREE.Vector3(-0.04, 0.0, 0);
+          const leftHipWorld = leftHipLocal.clone().add(this.puppet.position);
           
-          const dir = targetPos.clone().sub(hipWorld);
-          const distance = dir.length();
+          const leftLegDir = leftFootRingPos.clone().sub(leftHipWorld);
+          const leftLegLength = leftLegDir.length();
           
-          if (distance > 0.05) {
-            hip.lookAt(targetPos);
-            hip.rotateX(Math.PI / 2);
+          if (leftLegLength > 0.02) {
+            leftLegDir.normalize();
             
-            const maxReach = 0.26;
-            const bendRatio = Math.min(1, distance / maxReach);
-            knee.rotation.x = bendRatio * Math.PI * 0.3;
+            const pitch = Math.atan2(leftLegDir.y, Math.sqrt(leftLegDir.x * leftLegDir.x + leftLegDir.z * leftLegDir.z));
+            const yaw = Math.atan2(-leftLegDir.x, -leftLegDir.z);
+            
+            this.leftHipPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
+            
+            const maxLegReach = 0.26;
+            const kneeBend = Math.min(leftLegLength / maxLegReach, 1.0);
+            this.leftKneePivot.rotation.x = kneeBend * Math.PI * 0.25;
+          }
+
+          // ========== 右脚 ==========
+          const rightFootRingPos = this.rightFootRing.position;
+          const rightHipLocal = new THREE.Vector3(0.04, 0.0, 0);
+          const rightHipWorld = rightHipLocal.clone().add(this.puppet.position);
+          
+          const rightLegDir = rightFootRingPos.clone().sub(rightHipWorld);
+          const rightLegLength = rightLegDir.length();
+          
+          if (rightLegLength > 0.02) {
+            rightLegDir.normalize();
+            
+            const pitch = Math.atan2(rightLegDir.y, Math.sqrt(rightLegDir.x * rightLegDir.x + rightLegDir.z * rightLegDir.z));
+            const yaw = Math.atan2(-rightLegDir.x, -rightLegDir.z);
+            
+            this.rightHipPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
+            
+            const maxLegReach = 0.26;
+            const kneeBend = Math.min(rightLegLength / maxLegReach, 1.0);
+            this.rightKneePivot.rotation.x = kneeBend * Math.PI * 0.25;
           }
         }
 
