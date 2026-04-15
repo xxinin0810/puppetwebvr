@@ -316,89 +316,15 @@
         }
 
         /**
-         * 设置控制器交互（使用 Three.js 官方拖拽方案）
+         * 设置控制器交互
          */
         setupControllerInteraction() {
-          // 获取 Three.js renderer
-          const renderer = xb.core.renderer;
-          
-          // 获取控制器
-          this.controller1 = renderer.xr.getController(0);
-          this.controller1.addEventListener('selectstart', (e) => this.onSelectStart(e));
-          this.controller1.addEventListener('selectend', (e) => this.onSelectEnd(e));
-          this.add(this.controller1);
-
-          this.controller2 = renderer.xr.getController(1);
-          this.controller2.addEventListener('selectstart', (e) => this.onSelectStart(e));
-          this.controller2.addEventListener('selectend', (e) => this.onSelectEnd(e));
-          this.add(this.controller2);
-
-          // 添加射线可视化
-          const geometry = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(0, 0, -1)
-          ]);
-          
-          const line = new THREE.Line(geometry);
-          line.name = 'line';
-          line.scale.z = 5;
-          
-          this.controller1.add(line.clone());
-          this.controller2.add(line.clone());
-
-          // 射线检测器
+          // 使用 xrblocks 提供的控制器数据，在 update() 中手动处理交互
           this.raycaster = new THREE.Raycaster();
-        }
-
-        /**
-         * 抓取开始（Three.js 官方方案）
-         */
-        onSelectStart(event) {
-          const controller = event.target;
           
-          // 获取射线与牵引环的交点
-          const intersections = this.getIntersections(controller);
-          
-          if (intersections.length > 0) {
-            const ring = intersections[0].object;
-            
-            // 高亮显示
-            ring.material.emissive.setHex(0x880000);
-            
-            // 关键：将牵引环附着到控制器上，环会跟随手柄移动！
-            controller.attach(ring);
-            
-            controller.userData.selected = ring;
-          }
-        }
-
-        /**
-         * 抓取结束
-         */
-        onSelectEnd(event) {
-          const controller = event.target;
-          
-          if (controller.userData.selected !== undefined) {
-            const ring = controller.userData.selected;
-            
-            // 取消高亮
-            ring.material.emissive.setHex(0x442200);
-            
-            // 关键：将牵引环从控制器上分离，重新添加到 ringsGroup
-            this.ringsGroup.attach(ring);
-            
-            controller.userData.selected = undefined;
-          }
-        }
-
-        /**
-         * 获取射线交点
-         */
-        getIntersections(controller) {
-          controller.updateMatrixWorld();
-          this.raycaster.setFromXRController(controller);
-          
-          return this.raycaster.intersectObjects(this.ringsGroup.children, false);
+          // 抓取状态
+          this.grabbedRing = null;
+          this.grabbingControllerIndex = null;
         }
 
         /**
@@ -553,8 +479,12 @@
          * 渲染循环
          */
         update() {
+          // 更新控制线和木偶关节
           this.updateControlLines();
           this.updatePuppetJoints();
+
+          // 处理控制器交互
+          this.handleControllerInteraction();
 
           // 说话动画
           if (this.isMonkeyTalking) {
@@ -564,6 +494,71 @@
           } else {
             this.mouth.scale.set(1, 0.1, 1);
           }
+        }
+
+        /**
+         * 处理控制器交互
+         */
+        handleControllerInteraction() {
+          const controllers = xb.user.controllers;
+          
+          if (!controllers || !controllers.controllers) {
+            return;
+          }
+
+          // 遍历所有控制器
+          controllers.controllers.forEach((controller, index) => {
+            if (!controller) return;
+
+            // 获取手柄位置（使用 ray.origin 作为手柄位置）
+            const controllerPos = new THREE.Vector3();
+            if (controller.ray && controller.ray.origin) {
+              controller.ray.origin.toArray(controllerPos);
+            } else if (controller.position) {
+              controllerPos.copy(controller.position);
+            }
+
+            // 获取扳机键状态
+            const triggerPressed = controller.gamepad && 
+                                   controller.gamepad.buttons && 
+                                   controller.gamepad.buttons[0] && 
+                                   controller.gamepad.buttons[0].pressed;
+
+            if (triggerPressed) {
+              // 如果还没抓取东西，尝试抓取
+              if (!this.grabbedRing) {
+                let nearestRing = null;
+                let nearestDistance = 0.15;
+
+                // 查找最近的牵引环
+                this.ringsGroup.children.forEach(ring => {
+                  const distance = controllerPos.distanceTo(ring.position);
+                  if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestRing = ring;
+                  }
+                });
+
+                if (nearestRing) {
+                  this.grabbedRing = nearestRing;
+                  this.grabbingControllerIndex = index;
+                  nearestRing.material.emissive.setHex(0x880000);
+                  console.log('Grabbed ring:', nearestRing.userData.targetPart);
+                }
+              } else if (this.grabbingControllerIndex === index) {
+                // 已抓取，更新牵引环位置 = 手柄位置
+                this.grabbedRing.position.copy(controllerPos);
+              }
+            } else {
+              // 释放抓取
+              if (this.grabbedRing && this.grabbingControllerIndex === index) {
+                this.grabbedRing.material.emissive.setHex(0x442200);
+                console.log('Released ring');
+                this.grabbedRing = null;
+                this.grabbingControllerIndex = null;
+              }
+            }
+          });
         }
       }
 
