@@ -1,12 +1,9 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <title>Monkey Puppet Controller Interaction | XR Blocks</title>
-
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, user-scalable=no"
-    />
+    <title>Monkey Puppet - Controller Interaction</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
     <script>
       window.litDisableBundleWarning = true;
@@ -32,7 +29,6 @@
   </head>
 
   <body>
-    <!-- 用于在头显中显示潜在错误信息的浮层 -->
     <div id="debug-log" style="position: absolute; top: 10px; left: 10px; color: red; z-index: 9999; font-weight: bold; background: rgba(255,255,255,0.8); padding: 5px; display: none;"></div>
     
     <script type="module">
@@ -41,9 +37,12 @@
       import * as xb from 'xrblocks';
 
       /**
-       * PuppetMonkeyInteraction 演示了基于 VR 手柄控制器的牵线木偶交互。
-       * 猴子模型是一个完整的牵线木偶，有灵活的关节（头、肩、肘、腕、膝、踝），
-       * 玩家可以用手柄牵引木偶做各种动作。
+       * PuppetMonkeyInteraction - 牵线木偶交互
+       * 使用 Three.js 官方的拖拽方案：
+       * - 手柄射线检测牵引环
+       * - 按扳机键抓取：controller.attach(ring)
+       * - 释放：group.attach(ring)
+       * - 牵引环移动时，通过控制线拉动木偶部位
        */
       class PuppetMonkeyInteraction extends xb.Script {
         init() {
@@ -60,12 +59,12 @@
 
           const grid = panel.addGrid();
           grid.addRow({ weight: 0.5 }).addText({
-            text: '🐒 牵线木偶小猴子！\n\n用手柄抓取牵引环\n牵引猴子做动作！\n\n按扳机键抓取/释放',
+            text: '🐒 牵线木偶小猴子！\n\n用手柄射线瞄准牵引环\n按扳机键抓取并移动\n牵引猴子做动作！',
             fontColor: '#ffffff',
             fontSize: 0.05
           });
 
-          // 新增：AI 交互区域
+          // AI 交互按钮
           const aiRow = grid.addRow({ weight: 0.25 });
           const aiButton = aiRow.addCol({ weight: 0.5 }).addTextButton({
             text: '✨ 让小猴子看看',
@@ -81,328 +80,427 @@
             fontSize: 0.04
           });
 
-          // 程序化生成牵线木偶猴子
+          // 创建木偶和控制器
           this.createPuppetMonkey();
+          this.createControlRings();
           
-          // 创建牵引控制器
-          this.createPuppetController();
-          
-          // 控制状态
-          this.grabbedRing = null;
-          this.grabbingHand = null;
+          // 初始化控制器交互（使用 Three.js 官方方案）
+          this.setupControllerInteraction();
         }
 
         /**
-         * 创建一个完整的牵线木偶猴子
-         * 包含：头部、躯干、四肢（上臂、前臂、大腿、小腿）
-         * 关节：颈部、肩部、肘部、腕部、臀部、膝部、踝部
+         * 创建牵线木偶猴子
          */
         createPuppetMonkey() {
-          this.puppet = new THREE.Group();
+          this.puppetGroup = new THREE.Group();
           
-          // 材质定义
-          const brownMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
-          const lightBrownMaterial = new THREE.MeshPhongMaterial({ color: 0xD2B48C });
-          const blackMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
-          const jointMaterial = new THREE.MeshPhongMaterial({ color: 0x654321 });
+          const brown = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+          const lightBrown = new THREE.MeshPhongMaterial({ color: 0xD2B48C });
+          const black = new THREE.MeshPhongMaterial({ color: 0x000000 });
 
-          // ==================== 头部 ====================
-          this.headPivot = new THREE.Group(); // 颈部关节
+          // ========== 头部 ==========
+          this.headPivot = new THREE.Group();
           this.headPivot.position.set(0, 0.25, 0);
           
-          const head = new THREE.Mesh(new THREE.SphereGeometry(0.08, 32, 32), brownMaterial);
+          const head = new THREE.Mesh(new THREE.SphereGeometry(0.08, 32, 32), brown);
           head.position.set(0, 0.08, 0);
           this.headPivot.add(head);
 
-          // 嘴突部
-          const snout = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 32), lightBrownMaterial);
+          const snout = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 32), lightBrown);
           snout.position.set(0, 0.05, 0.06);
           snout.scale.set(1, 0.7, 1.2);
           this.headPivot.add(snout);
 
-          // 眼睛
           const eyeGeom = new THREE.SphereGeometry(0.012, 16, 16);
-          const leftEye = new THREE.Mesh(eyeGeom, blackMaterial);
+          const leftEye = new THREE.Mesh(eyeGeom, black);
           leftEye.position.set(-0.03, 0.1, 0.06);
           this.headPivot.add(leftEye);
-          const rightEye = new THREE.Mesh(eyeGeom, blackMaterial);
+          const rightEye = new THREE.Mesh(eyeGeom, black);
           rightEye.position.set(0.03, 0.1, 0.06);
           this.headPivot.add(rightEye);
 
-          // 耳朵
           const earGeom = new THREE.SphereGeometry(0.03, 16, 16);
-          const leftEar = new THREE.Mesh(earGeom, brownMaterial);
+          const leftEar = new THREE.Mesh(earGeom, brown);
           leftEar.position.set(-0.08, 0.08, 0);
           leftEar.scale.set(0.5, 1, 1);
           this.headPivot.add(leftEar);
-          const rightEar = new THREE.Mesh(earGeom, brownMaterial);
+          const rightEar = new THREE.Mesh(earGeom, brown);
           rightEar.position.set(0.08, 0.08, 0);
           rightEar.scale.set(0.5, 1, 1);
           this.headPivot.add(rightEar);
 
-          // 嘴巴（可动画）
-          this.mouth = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 16), blackMaterial);
+          this.mouth = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 16), black);
           this.mouth.position.set(0, 0.04, 0.09);
           this.mouth.scale.set(1, 0.1, 1);
           this.headPivot.add(this.mouth);
 
-          this.puppet.add(this.headPivot);
+          this.puppetGroup.add(this.headPivot);
 
-          // ==================== 躯干 ====================
-          const torso = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.06, 0.07, 0.15, 16),
-            brownMaterial
-          );
+          // ========== 躯干 ==========
+          const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.15, 16), brown);
           torso.position.set(0, 0.1, 0);
-          this.puppet.add(torso);
+          this.puppetGroup.add(torso);
 
-          // ==================== 左臂 ====================
-          // 左肩关节
+          // ========== 左臂 ==========
           this.leftShoulderPivot = new THREE.Group();
           this.leftShoulderPivot.position.set(-0.08, 0.15, 0);
           
-          // 左上臂
-          const leftUpperArm = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.025, 0.02, 0.12, 12),
-            brownMaterial
-          );
+          const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.02, 0.12, 12), brown);
           leftUpperArm.position.set(0, -0.06, 0);
           this.leftShoulderPivot.add(leftUpperArm);
 
-          // 左肘关节
           this.leftElbowPivot = new THREE.Group();
           this.leftElbowPivot.position.set(0, -0.12, 0);
           
-          // 左前臂
-          const leftForearm = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.018, 0.015, 0.1, 12),
-            brownMaterial
-          );
+          const leftForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.015, 0.1, 12), brown);
           leftForearm.position.set(0, -0.05, 0);
           this.leftElbowPivot.add(leftForearm);
 
-          // 左手腕关节
-          this.leftWristPivot = new THREE.Group();
-          this.leftWristPivot.position.set(0, -0.1, 0);
+          this.leftHandPivot = new THREE.Group();
+          this.leftHandPivot.position.set(0, -0.1, 0);
+          const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12), lightBrown);
+          this.leftHandPivot.add(leftHand);
           
-          // 左手掌
-          const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12), lightBrownMaterial);
-          this.leftWristPivot.add(leftHand);
-          
-          this.leftElbowPivot.add(this.leftWristPivot);
+          this.leftElbowPivot.add(this.leftHandPivot);
           this.leftShoulderPivot.add(this.leftElbowPivot);
-          this.puppet.add(this.leftShoulderPivot);
+          this.puppetGroup.add(this.leftShoulderPivot);
 
-          // ==================== 右臂 ====================
+          // ========== 右臂 ==========
           this.rightShoulderPivot = new THREE.Group();
           this.rightShoulderPivot.position.set(0.08, 0.15, 0);
           
-          const rightUpperArm = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.025, 0.02, 0.12, 12),
-            brownMaterial
-          );
+          const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.02, 0.12, 12), brown);
           rightUpperArm.position.set(0, -0.06, 0);
           this.rightShoulderPivot.add(rightUpperArm);
 
           this.rightElbowPivot = new THREE.Group();
           this.rightElbowPivot.position.set(0, -0.12, 0);
           
-          const rightForearm = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.018, 0.015, 0.1, 12),
-            brownMaterial
-          );
+          const rightForearm = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.015, 0.1, 12), brown);
           rightForearm.position.set(0, -0.05, 0);
           this.rightElbowPivot.add(rightForearm);
 
-          this.rightWristPivot = new THREE.Group();
-          this.rightWristPivot.position.set(0, -0.1, 0);
+          this.rightHandPivot = new THREE.Group();
+          this.rightHandPivot.position.set(0, -0.1, 0);
+          const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12), lightBrown);
+          this.rightHandPivot.add(rightHand);
           
-          const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12), lightBrownMaterial);
-          this.rightWristPivot.add(rightHand);
-          
-          this.rightElbowPivot.add(this.rightWristPivot);
+          this.rightElbowPivot.add(this.rightHandPivot);
           this.rightShoulderPivot.add(this.rightElbowPivot);
-          this.puppet.add(this.rightShoulderPivot);
+          this.puppetGroup.add(this.rightShoulderPivot);
 
-          // ==================== 左腿 ====================
-          // 左臀关节
+          // ========== 左腿 ==========
           this.leftHipPivot = new THREE.Group();
           this.leftHipPivot.position.set(-0.04, 0.0, 0);
           
-          // 左大腿
-          const leftThigh = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.03, 0.025, 0.14, 12),
-            brownMaterial
-          );
+          const leftThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, 0.14, 12), brown);
           leftThigh.position.set(0, -0.07, 0);
           this.leftHipPivot.add(leftThigh);
 
-          // 左膝关节
           this.leftKneePivot = new THREE.Group();
           this.leftKneePivot.position.set(0, -0.14, 0);
           
-          // 左小腿
-          const leftCalf = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.015, 0.12, 12),
-            brownMaterial
-          );
+          const leftCalf = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.015, 0.12, 12), brown);
           leftCalf.position.set(0, -0.06, 0);
           this.leftKneePivot.add(leftCalf);
 
-          // 左踝关节
-          this.leftAnklePivot = new THREE.Group();
-          this.leftAnklePivot.position.set(0, -0.12, 0);
-          
-          // 左脚
-          const leftFoot = new THREE.Mesh(
-            new THREE.BoxGeometry(0.03, 0.02, 0.06),
-            brownMaterial
-          );
+          this.leftFootPivot = new THREE.Group();
+          this.leftFootPivot.position.set(0, -0.12, 0);
+          const leftFoot = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.06), brown);
           leftFoot.position.set(0, -0.01, 0.02);
-          this.leftAnklePivot.add(leftFoot);
+          this.leftFootPivot.add(leftFoot);
           
-          this.leftKneePivot.add(this.leftAnklePivot);
+          this.leftKneePivot.add(this.leftFootPivot);
           this.leftHipPivot.add(this.leftKneePivot);
-          this.puppet.add(this.leftHipPivot);
+          this.puppetGroup.add(this.leftHipPivot);
 
-          // ==================== 右腿 ====================
+          // ========== 右腿 ==========
           this.rightHipPivot = new THREE.Group();
           this.rightHipPivot.position.set(0.04, 0.0, 0);
           
-          const rightThigh = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.03, 0.025, 0.14, 12),
-            brownMaterial
-          );
+          const rightThigh = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, 0.14, 12), brown);
           rightThigh.position.set(0, -0.07, 0);
           this.rightHipPivot.add(rightThigh);
 
           this.rightKneePivot = new THREE.Group();
           this.rightKneePivot.position.set(0, -0.14, 0);
           
-          const rightCalf = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.015, 0.12, 12),
-            brownMaterial
-          );
+          const rightCalf = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.015, 0.12, 12), brown);
           rightCalf.position.set(0, -0.06, 0);
           this.rightKneePivot.add(rightCalf);
 
-          this.rightAnklePivot = new THREE.Group();
-          this.rightAnklePivot.position.set(0, -0.12, 0);
-          
-          const rightFoot = new THREE.Mesh(
-            new THREE.BoxGeometry(0.03, 0.02, 0.06),
-            brownMaterial
-          );
+          this.rightFootPivot = new THREE.Group();
+          this.rightFootPivot.position.set(0, -0.12, 0);
+          const rightFoot = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.06), brown);
           rightFoot.position.set(0, -0.01, 0.02);
-          this.rightAnklePivot.add(rightFoot);
+          this.rightFootPivot.add(rightFoot);
           
-          this.rightKneePivot.add(this.rightAnklePivot);
+          this.rightKneePivot.add(this.rightFootPivot);
           this.rightHipPivot.add(this.rightKneePivot);
-          this.puppet.add(this.rightHipPivot);
+          this.puppetGroup.add(this.rightHipPivot);
 
-          // 设置木偶初始位置
-          this.puppet.position.set(0, 1.2, -1.0);
-          this.add(this.puppet);
+          // 设置木偶位置
+          this.puppetGroup.position.set(0, 1.2, -1.0);
+          this.add(this.puppetGroup);
         }
 
         /**
-         * 创建牵引控制器
-         * 包括牵引环和控制线
+         * 创建牵引环（可被抓取的物体）
          */
-        createPuppetController() {
-          // 牵引环材质
+        createControlRings() {
+          // 牵引环组（用于 attach/detach）
+          this.ringsGroup = new THREE.Group();
+          this.add(this.ringsGroup);
+
           const ringMaterial = new THREE.MeshPhongMaterial({ 
             color: 0xffd700,
-            emissive: 0x442200,
-            metalness: 0.8
-          });
-          
-          // 控制线材质
-          const lineMaterial = new THREE.LineBasicMaterial({ 
-            color: 0xffffff,
-            linewidth: 2
+            emissive: 0x442200
           });
 
-          // 创建牵引环的函数
-          const createRing = (radius = 0.04) => {
-            const ringGeom = new THREE.TorusGeometry(radius, 0.005, 8, 32);
+          const createRing = () => {
+            const ringGeom = new THREE.TorusGeometry(0.04, 0.008, 16, 32);
             const ring = new THREE.Mesh(ringGeom, ringMaterial);
-            ring.userData.isGrabbable = true;
+            ring.userData.isGrabbable = true; // 标记为可抓取
             return ring;
           };
 
-          // ==================== 头部牵引环 ====================
+          // 创建 5 个牵引环
           this.headRing = createRing();
           this.headRing.position.set(0, 1.6, -1.0);
-          this.add(this.headRing);
-          
-          this.headLine = this.createControlLine(this.headRing, this.headPivot);
-          this.add(this.headLine);
+          this.headRing.userData.targetPart = 'head';
+          this.ringsGroup.add(this.headRing);
 
-          // ==================== 左手牵引环 ====================
           this.leftHandRing = createRing();
           this.leftHandRing.position.set(-0.3, 1.4, -1.0);
-          this.add(this.leftHandRing);
-          
-          this.leftHandLine = this.createControlLine(this.leftHandRing, this.leftWristPivot);
-          this.add(this.leftHandLine);
+          this.leftHandRing.userData.targetPart = 'leftHand';
+          this.ringsGroup.add(this.leftHandRing);
 
-          // ==================== 右手牵引环 ====================
           this.rightHandRing = createRing();
           this.rightHandRing.position.set(0.3, 1.4, -1.0);
-          this.add(this.rightHandRing);
-          
-          this.rightHandLine = this.createControlLine(this.rightHandRing, this.rightWristPivot);
-          this.add(this.rightHandLine);
+          this.rightHandRing.userData.targetPart = 'rightHand';
+          this.ringsGroup.add(this.rightHandRing);
 
-          // ==================== 左脚牵引环 ====================
           this.leftFootRing = createRing();
           this.leftFootRing.position.set(-0.15, 0.8, -1.0);
-          this.add(this.leftFootRing);
-          
-          this.leftFootLine = this.createControlLine(this.leftFootRing, this.leftAnklePivot);
-          this.add(this.leftFootLine);
+          this.leftFootRing.userData.targetPart = 'leftFoot';
+          this.ringsGroup.add(this.leftFootRing);
 
-          // ==================== 右脚牵引环 ====================
           this.rightFootRing = createRing();
           this.rightFootRing.position.set(0.15, 0.8, -1.0);
-          this.add(this.rightFootRing);
-          
-          this.rightFootLine = this.createControlLine(this.rightFootRing, this.rightAnklePivot);
-          this.add(this.rightFootLine);
+          this.rightFootRing.userData.targetPart = 'rightFoot';
+          this.ringsGroup.add(this.rightFootRing);
 
-          // 存储所有牵引环
-          this.controlRings = [
-            this.headRing,
-            this.leftHandRing,
-            this.rightHandRing,
-            this.leftFootRing,
-            this.rightFootRing
-          ];
-        }
-
-        /**
-         * 创建控制线（连接牵引环和木偶部位）
-         */
-        createControlLine(ring, targetPart) {
-          const geometry = new THREE.BufferGeometry();
-          const positions = new Float32Array(6); // 2个点，每个点3个坐标
-          geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-          
-          const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ 
+          // 创建控制线
+          this.controlLines = [];
+          const lineMaterial = new THREE.LineBasicMaterial({ 
             color: 0xffffff,
             transparent: true,
             opacity: 0.6
-          }));
-          
-          line.userData.ring = ring;
-          line.userData.targetPart = targetPart;
-          
-          return line;
+          });
+
+          const rings = [this.headRing, this.leftHandRing, this.rightHandRing, this.leftFootRing, this.rightFootRing];
+          const targets = [this.headPivot, this.leftHandPivot, this.rightHandPivot, this.leftFootPivot, this.rightFootPivot];
+
+          rings.forEach((ring, i) => {
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(6);
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const line = new THREE.Line(geometry, lineMaterial);
+            line.userData.ring = ring;
+            line.userData.target = targets[i];
+            
+            this.add(line);
+            this.controlLines.push(line);
+          });
         }
 
         /**
-         * 调用 Gemini API 获取视觉分析
+         * 设置控制器交互（使用 Three.js 官方拖拽方案）
+         */
+        setupControllerInteraction() {
+          // 获取 Three.js renderer
+          const renderer = xb.core.renderer;
+          
+          // 获取控制器
+          this.controller1 = renderer.xr.getController(0);
+          this.controller1.addEventListener('selectstart', (e) => this.onSelectStart(e));
+          this.controller1.addEventListener('selectend', (e) => this.onSelectEnd(e));
+          this.add(this.controller1);
+
+          this.controller2 = renderer.xr.getController(1);
+          this.controller2.addEventListener('selectstart', (e) => this.onSelectStart(e));
+          this.controller2.addEventListener('selectend', (e) => this.onSelectEnd(e));
+          this.add(this.controller2);
+
+          // 添加射线可视化
+          const geometry = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, 0, -1)
+          ]);
+          
+          const line = new THREE.Line(geometry);
+          line.name = 'line';
+          line.scale.z = 5;
+          
+          this.controller1.add(line.clone());
+          this.controller2.add(line.clone());
+
+          // 射线检测器
+          this.raycaster = new THREE.Raycaster();
+        }
+
+        /**
+         * 抓取开始（Three.js 官方方案）
+         */
+        onSelectStart(event) {
+          const controller = event.target;
+          
+          // 获取射线与牵引环的交点
+          const intersections = this.getIntersections(controller);
+          
+          if (intersections.length > 0) {
+            const ring = intersections[0].object;
+            
+            // 高亮显示
+            ring.material.emissive.setHex(0x880000);
+            
+            // 关键：将牵引环附着到控制器上，环会跟随手柄移动！
+            controller.attach(ring);
+            
+            controller.userData.selected = ring;
+          }
+        }
+
+        /**
+         * 抓取结束
+         */
+        onSelectEnd(event) {
+          const controller = event.target;
+          
+          if (controller.userData.selected !== undefined) {
+            const ring = controller.userData.selected;
+            
+            // 取消高亮
+            ring.material.emissive.setHex(0x442200);
+            
+            // 关键：将牵引环从控制器上分离，重新添加到 ringsGroup
+            this.ringsGroup.attach(ring);
+            
+            controller.userData.selected = undefined;
+          }
+        }
+
+        /**
+         * 获取射线交点
+         */
+        getIntersections(controller) {
+          controller.updateMatrixWorld();
+          this.raycaster.setFromXRController(controller);
+          
+          return this.raycaster.intersectObjects(this.ringsGroup.children, false);
+        }
+
+        /**
+         * 更新控制线
+         */
+        updateControlLines() {
+          this.controlLines.forEach(line => {
+            const ring = line.userData.ring;
+            const target = line.userData.target;
+            
+            // 获取牵引环的世界坐标
+            const ringWorld = new THREE.Vector3();
+            ring.getWorldPosition(ringWorld);
+            
+            // 获取目标部位的世界坐标
+            const targetWorld = new THREE.Vector3();
+            target.getWorldPosition(targetWorld);
+            
+            // 更新线的顶点
+            const positions = line.geometry.attributes.position.array;
+            positions[0] = ringWorld.x;
+            positions[1] = ringWorld.y;
+            positions[2] = ringWorld.z;
+            positions[3] = targetWorld.x;
+            positions[4] = targetWorld.y;
+            positions[5] = targetWorld.z;
+            line.geometry.attributes.position.needsUpdate = true;
+          });
+        }
+
+        /**
+         * 根据牵引环位置更新木偶关节
+         */
+        updatePuppetJoints() {
+          // 获取木偶中心位置
+          const puppetPos = this.puppetGroup.position;
+          
+          // 头部
+          const headRingPos = this.headRing.position;
+          const headOffset = headRingPos.clone().sub(puppetPos).sub(new THREE.Vector3(0, 0.35, 0));
+          this.headPivot.rotation.z = THREE.MathUtils.clamp(headOffset.x * 5, -0.8, 0.8);
+          this.headPivot.rotation.x = THREE.MathUtils.clamp(-headOffset.z * 5, -0.8, 0.8);
+
+          // 左手
+          const leftHandRingPos = this.leftHandRing.position;
+          const leftShoulderPos = puppetPos.clone().add(new THREE.Vector3(-0.08, 0.15, 0));
+          const leftArmDir = leftHandRingPos.clone().sub(leftShoulderPos);
+          const leftArmLen = leftArmDir.length();
+          
+          if (leftArmLen > 0.02) {
+            leftArmDir.normalize();
+            const pitch = Math.atan2(leftArmDir.y, Math.sqrt(leftArmDir.x * leftArmDir.x + leftArmDir.z * leftArmDir.z));
+            const yaw = Math.atan2(-leftArmDir.x, -leftArmDir.z);
+            this.leftShoulderPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
+            this.leftElbowPivot.rotation.x = -Math.min(leftArmLen / 0.22, 1.2) * Math.PI * 0.35;
+          }
+
+          // 右手
+          const rightHandRingPos = this.rightHandRing.position;
+          const rightShoulderPos = puppetPos.clone().add(new THREE.Vector3(0.08, 0.15, 0));
+          const rightArmDir = rightHandRingPos.clone().sub(rightShoulderPos);
+          const rightArmLen = rightArmDir.length();
+          
+          if (rightArmLen > 0.02) {
+            rightArmDir.normalize();
+            const pitch = Math.atan2(rightArmDir.y, Math.sqrt(rightArmDir.x * rightArmDir.x + rightArmDir.z * rightArmDir.z));
+            const yaw = Math.atan2(-rightArmDir.x, -rightArmDir.z);
+            this.rightShoulderPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
+            this.rightElbowPivot.rotation.x = -Math.min(rightArmLen / 0.22, 1.2) * Math.PI * 0.35;
+          }
+
+          // 左脚
+          const leftFootRingPos = this.leftFootRing.position;
+          const leftHipPos = puppetPos.clone().add(new THREE.Vector3(-0.04, 0.0, 0));
+          const leftLegDir = leftFootRingPos.clone().sub(leftHipPos);
+          const leftLegLen = leftLegDir.length();
+          
+          if (leftLegLen > 0.02) {
+            leftLegDir.normalize();
+            const pitch = Math.atan2(leftLegDir.y, Math.sqrt(leftLegDir.x * leftLegDir.x + leftLegDir.z * leftLegDir.z));
+            const yaw = Math.atan2(-leftLegDir.x, -leftLegDir.z);
+            this.leftHipPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
+            this.leftKneePivot.rotation.x = Math.min(leftLegLen / 0.26, 1.0) * Math.PI * 0.25;
+          }
+
+          // 右脚
+          const rightFootRingPos = this.rightFootRing.position;
+          const rightHipPos = puppetPos.clone().add(new THREE.Vector3(0.04, 0.0, 0));
+          const rightLegDir = rightFootRingPos.clone().sub(rightHipPos);
+          const rightLegLen = rightLegDir.length();
+          
+          if (rightLegLen > 0.02) {
+            rightLegDir.normalize();
+            const pitch = Math.atan2(rightLegDir.y, Math.sqrt(rightLegDir.x * rightLegDir.x + rightLegDir.z * rightLegDir.z));
+            const yaw = Math.atan2(-rightLegDir.x, -rightLegDir.z);
+            this.rightHipPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
+            this.rightKneePivot.rotation.x = Math.min(rightLegLen / 0.26, 1.0) * Math.PI * 0.25;
+          }
+        }
+
+        /**
+         * AI 交互
          */
         async askMonkey() {
           const ai = xb.core.ai;
@@ -442,7 +540,6 @@
             });
             this.responseDisplay.setText(`🐒: ${response.text}`);
             
-            // 触发猴子自动张嘴说话的动画效果
             this.isMonkeyTalking = true;
             this.talkStartTime = performance.now();
             setTimeout(() => { this.isMonkeyTalking = false; }, 4000);
@@ -453,160 +550,13 @@
         }
 
         /**
-         * 更新控制线位置
-         */
-        updateControlLine(line) {
-          const ring = line.userData.ring;
-          const targetPart = line.userData.targetPart;
-          
-          // 获取牵引环的世界坐标
-          const ringWorldPos = new THREE.Vector3();
-          ring.getWorldPosition(ringWorldPos);
-          
-          // 获取目标部位的世界坐标
-          const targetWorldPos = new THREE.Vector3();
-          targetPart.getWorldPosition(targetWorldPos);
-          
-          // 更新线的顶点
-          const positions = line.geometry.attributes.position.array;
-          positions[0] = ringWorldPos.x;
-          positions[1] = ringWorldPos.y;
-          positions[2] = ringWorldPos.z;
-          positions[3] = targetWorldPos.x;
-          positions[4] = targetWorldPos.y;
-          positions[5] = targetWorldPos.z;
-          line.geometry.attributes.position.needsUpdate = true;
-        }
-
-        /**
-         * 根据牵引环位置更新木偶部位位置
-         * 牵线木偶原理：牵引环在哪里，木偶部位就被"拉"到哪里
-         */
-        updatePuppetJoints() {
-          // 先更新一次 world matrix，确保位置正确
-          this.puppet.updateMatrixWorld(true);
-          
-          // ========== 头部 ==========
-          // 头部牵引环控制头部倾斜
-          const headRingPos = this.headRing.position;
-          const headDefaultY = this.puppet.position.y + 0.35;
-          
-          // 计算偏移量（只关心水平方向的偏移）
-          const headOffsetX = headRingPos.x - this.puppet.position.x;
-          const headOffsetZ = headRingPos.z - this.puppet.position.z;
-          
-          // 应用到头部旋转（限幅）
-          this.headPivot.rotation.z = THREE.MathUtils.clamp(headOffsetX * 5, -0.8, 0.8);
-          this.headPivot.rotation.x = THREE.MathUtils.clamp(-headOffsetZ * 5, -0.8, 0.8);
-
-          // ========== 左手 ==========
-          const leftHandRingPos = this.leftHandRing.position;
-          
-          // 肩膀相对于木偶的局部位置
-          const leftShoulderLocal = new THREE.Vector3(-0.08, 0.15, 0);
-          const leftShoulderWorld = leftShoulderLocal.clone().add(this.puppet.position);
-          
-          // 方向向量：从肩膀到牵引环
-          const leftArmDir = leftHandRingPos.clone().sub(leftShoulderWorld);
-          const leftArmLength = leftArmDir.length();
-          
-          if (leftArmLength > 0.02) {
-            leftArmDir.normalize();
-            
-            // 计算旋转角度
-            const pitch = Math.atan2(leftArmDir.y, Math.sqrt(leftArmDir.x * leftArmDir.x + leftArmDir.z * leftArmDir.z));
-            const yaw = Math.atan2(-leftArmDir.x, -leftArmDir.z);
-            
-            this.leftShoulderPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
-            
-            // 肘部弯曲
-            const maxArmReach = 0.22;
-            const elbowBend = Math.min(leftArmLength / maxArmReach, 1.2);
-            this.leftElbowPivot.rotation.x = -elbowBend * Math.PI * 0.35;
-          }
-
-          // ========== 右手 ==========
-          const rightHandRingPos = this.rightHandRing.position;
-          const rightShoulderLocal = new THREE.Vector3(0.08, 0.15, 0);
-          const rightShoulderWorld = rightShoulderLocal.clone().add(this.puppet.position);
-          
-          const rightArmDir = rightHandRingPos.clone().sub(rightShoulderWorld);
-          const rightArmLength = rightArmDir.length();
-          
-          if (rightArmLength > 0.02) {
-            rightArmDir.normalize();
-            
-            const pitch = Math.atan2(rightArmDir.y, Math.sqrt(rightArmDir.x * rightArmDir.x + rightArmDir.z * rightArmDir.z));
-            const yaw = Math.atan2(-rightArmDir.x, -rightArmDir.z);
-            
-            this.rightShoulderPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
-            
-            const maxArmReach = 0.22;
-            const elbowBend = Math.min(rightArmLength / maxArmReach, 1.2);
-            this.rightElbowPivot.rotation.x = -elbowBend * Math.PI * 0.35;
-          }
-
-          // ========== 左脚 ==========
-          const leftFootRingPos = this.leftFootRing.position;
-          const leftHipLocal = new THREE.Vector3(-0.04, 0.0, 0);
-          const leftHipWorld = leftHipLocal.clone().add(this.puppet.position);
-          
-          const leftLegDir = leftFootRingPos.clone().sub(leftHipWorld);
-          const leftLegLength = leftLegDir.length();
-          
-          if (leftLegLength > 0.02) {
-            leftLegDir.normalize();
-            
-            const pitch = Math.atan2(leftLegDir.y, Math.sqrt(leftLegDir.x * leftLegDir.x + leftLegDir.z * leftLegDir.z));
-            const yaw = Math.atan2(-leftLegDir.x, -leftLegDir.z);
-            
-            this.leftHipPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
-            
-            const maxLegReach = 0.26;
-            const kneeBend = Math.min(leftLegLength / maxLegReach, 1.0);
-            this.leftKneePivot.rotation.x = kneeBend * Math.PI * 0.25;
-          }
-
-          // ========== 右脚 ==========
-          const rightFootRingPos = this.rightFootRing.position;
-          const rightHipLocal = new THREE.Vector3(0.04, 0.0, 0);
-          const rightHipWorld = rightHipLocal.clone().add(this.puppet.position);
-          
-          const rightLegDir = rightFootRingPos.clone().sub(rightHipWorld);
-          const rightLegLength = rightLegDir.length();
-          
-          if (rightLegLength > 0.02) {
-            rightLegDir.normalize();
-            
-            const pitch = Math.atan2(rightLegDir.y, Math.sqrt(rightLegDir.x * rightLegDir.x + rightLegDir.z * rightLegDir.z));
-            const yaw = Math.atan2(-rightLegDir.x, -rightLegDir.z);
-            
-            this.rightHipPivot.rotation.set(pitch - Math.PI/2, yaw, 0, 'YXZ');
-            
-            const maxLegReach = 0.26;
-            const kneeBend = Math.min(rightLegLength / maxLegReach, 1.0);
-            this.rightKneePivot.rotation.x = kneeBend * Math.PI * 0.25;
-          }
-        }
-
-        /**
-         * 渲染循环：处理手柄交互和木偶动画
+         * 渲染循环
          */
         update() {
-          // 更新控制线
-          this.updateControlLine(this.headLine);
-          this.updateControlLine(this.leftHandLine);
-          this.updateControlLine(this.rightHandLine);
-          this.updateControlLine(this.leftFootLine);
-          this.updateControlLine(this.rightFootLine);
-
-          // 更新木偶关节
+          this.updateControlLines();
           this.updatePuppetJoints();
 
-          // 处理手柄交互
-          this.handleControllerInteraction();
-
-          // 处理说话动画
+          // 说话动画
           if (this.isMonkeyTalking) {
             const time = (performance.now() - this.talkStartTime) / 100;
             const openRatio = (Math.sin(time) + 1) / 2;
@@ -615,71 +565,10 @@
             this.mouth.scale.set(1, 0.1, 1);
           }
         }
-
-        /**
-         * 处理手柄抓取交互
-         */
-        handleControllerInteraction() {
-          const controllers = xb.user.controllers;
-          
-          if (!controllers || !controllers.controllers) {
-            return;
-          }
-
-          controllers.controllers.forEach((controller, index) => {
-            if (!controller || !controller.gamepad) return;
-
-            const gamepad = controller.gamepad;
-            const triggerPressed = gamepad.buttons[0] && gamepad.buttons[0].pressed;
-
-            // 获取手柄的世界位置
-            const controllerPos = new THREE.Vector3();
-            if (controller.ray) {
-              controller.ray.origin.toArray(controllerPos);
-            }
-
-            if (triggerPressed) {
-              // 如果还没抓取东西，尝试抓取
-              if (!this.grabbedRing) {
-                // 查找最近的牵引环
-                let nearestRing = null;
-                let nearestDistance = 0.15; // 抓取距离阈值
-
-                this.controlRings.forEach(ring => {
-                  const ringPos = new THREE.Vector3();
-                  ring.getWorldPosition(ringPos);
-                  const distance = controllerPos.distanceTo(ringPos);
-                  
-                  if (distance < nearestDistance) {
-                    nearestDistance = distance;
-                    nearestRing = ring;
-                  }
-                });
-
-                if (nearestRing) {
-                  this.grabbedRing = nearestRing;
-                  this.grabbingHand = index;
-                  nearestRing.material.emissive.setHex(0x880000);
-                }
-              } else if (this.grabbingHand === index) {
-                // 已抓取，更新牵引环位置
-                this.grabbedRing.position.copy(controllerPos);
-              }
-            } else {
-              // 释放抓取
-              if (this.grabbedRing && this.grabbingHand === index) {
-                this.grabbedRing.material.emissive.setHex(0x442200);
-                this.grabbedRing = null;
-                this.grabbingHand = null;
-              }
-            }
-          });
-        }
       }
 
       async function start() {
         try {
-          // 在初始化前，先检测设备是否有可用的摄像头硬件
           let hasVideoInput = false;
           if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
             const devices = await navigator.mediaDevices.enumerateDevices();
@@ -687,35 +576,22 @@
           }
 
           const options = new xb.Options();
-          
-          // 必须开启 UI 模块，SpatialPanel 才能正常工作
           options.enableUI(); 
-
-          // 启用 AI
           options.enableAI();
           
-          // 仅在检测到物理摄像头时开启相机模块
           if (hasVideoInput) {
             options.enableCamera(); 
           }
           
-          // 启用 XR Transitions 以提供 "Enter VR" 入口
           options.enableXRTransitions();
-
-          // 设置 VR 模式
           options.enableVR();
-
-          // 启用手柄控制器（而不是手势追踪）
           options.enableControllers();
-          options.controllers.enabled = true;
-          options.controllers.visualization = true;
 
           options.simulator.defaultMode = xb.SimulatorMode.POSE;
           
           xb.add(new PuppetMonkeyInteraction());
           await xb.init(options);
         } catch (error) {
-          // 如果失败，会在屏幕左上角打印红色错误信息
           const logDiv = document.getElementById('debug-log');
           logDiv.style.display = 'block';
           logDiv.innerText = '初始化失败: ' + error.message + '\n\nStack: ' + (error.stack || '');
