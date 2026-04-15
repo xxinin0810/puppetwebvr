@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <title>Monkey Puppet Gesture Interaction | XR Blocks</title>
+    <title>Monkey Puppet Controller Interaction | XR Blocks</title>
 
     <meta
       name="viewport"
@@ -41,8 +41,9 @@
       import * as xb from 'xrblocks';
 
       /**
-       * PuppetMonkeyInteraction 演示了基于手势追踪的交互。
-       * 猴子模型会吸附在用户的手腕上，并根据食指和拇指的捏合距离（Pinch）来张嘴和挥舞手臂。
+       * PuppetMonkeyInteraction 演示了基于 VR 手柄控制器的牵线木偶交互。
+       * 猴子模型是一个完整的牵线木偶，有灵活的关节（头、肩、肘、腕、膝、踝），
+       * 玩家可以用手柄牵引木偶做各种动作。
        */
       class PuppetMonkeyInteraction extends xb.Script {
         init() {
@@ -59,9 +60,9 @@
 
           const grid = panel.addGrid();
           grid.addRow({ weight: 0.5 }).addText({
-            text: '🐒 木偶小猴子！\n把手举到视野中。\n捏合手指来控制它张嘴！',
+            text: '🐒 牵线木偶小猴子！\n\n用手柄抓取牵引环\n牵引猴子做动作！\n\n按扳机键抓取/释放',
             fontColor: '#ffffff',
-            fontSize: 0.06
+            fontSize: 0.05
           });
 
           // 新增：AI 交互区域
@@ -80,82 +81,328 @@
             fontSize: 0.04
           });
 
-          // 程序化生成猴子模型
-          this.createMonkey();
+          // 程序化生成牵线木偶猴子
+          this.createPuppetMonkey();
+          
+          // 创建牵引控制器
+          this.createPuppetController();
+          
+          // 控制状态
+          this.grabbedRing = null;
+          this.grabbingHand = null;
         }
 
         /**
-         * 使用 THREE.js 基础几何体拼接出一个简易猴子
+         * 创建一个完整的牵线木偶猴子
+         * 包含：头部、躯干、四肢（上臂、前臂、大腿、小腿）
+         * 关节：颈部、肩部、肘部、腕部、臀部、膝部、踝部
          */
-        createMonkey() {
-          this.monkey = new THREE.Group();
+        createPuppetMonkey() {
+          this.puppet = new THREE.Group();
           
+          // 材质定义
           const brownMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
           const lightBrownMaterial = new THREE.MeshPhongMaterial({ color: 0xD2B48C });
           const blackMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+          const jointMaterial = new THREE.MeshPhongMaterial({ color: 0x654321 });
 
-          // 头部
-          const head = new THREE.Mesh(new THREE.SphereGeometry(0.06, 32, 32), brownMaterial);
+          // ==================== 头部 ====================
+          this.headPivot = new THREE.Group(); // 颈部关节
+          this.headPivot.position.set(0, 0.25, 0);
+          
+          const head = new THREE.Mesh(new THREE.SphereGeometry(0.08, 32, 32), brownMaterial);
           head.position.set(0, 0.08, 0);
-          this.monkey.add(head);
+          this.headPivot.add(head);
 
-          // 嘴突部 (Snout)
-          const snout = new THREE.Mesh(new THREE.SphereGeometry(0.035, 32, 32), lightBrownMaterial);
-          snout.position.set(0, 0.06, 0.05);
-          this.monkey.add(snout);
+          // 嘴突部
+          const snout = new THREE.Mesh(new THREE.SphereGeometry(0.045, 32, 32), lightBrownMaterial);
+          snout.position.set(0, 0.05, 0.06);
+          snout.scale.set(1, 0.7, 1.2);
+          this.headPivot.add(snout);
 
           // 眼睛
-          const eyeGeom = new THREE.SphereGeometry(0.01, 16, 16);
+          const eyeGeom = new THREE.SphereGeometry(0.012, 16, 16);
           const leftEye = new THREE.Mesh(eyeGeom, blackMaterial);
-          leftEye.position.set(-0.025, 0.1, 0.05);
-          this.monkey.add(leftEye);
+          leftEye.position.set(-0.03, 0.1, 0.06);
+          this.headPivot.add(leftEye);
           const rightEye = new THREE.Mesh(eyeGeom, blackMaterial);
-          rightEye.position.set(0.025, 0.1, 0.05);
-          this.monkey.add(rightEye);
+          rightEye.position.set(0.03, 0.1, 0.06);
+          this.headPivot.add(rightEye);
 
           // 耳朵
-          const earGeom = new THREE.SphereGeometry(0.025, 16, 16);
+          const earGeom = new THREE.SphereGeometry(0.03, 16, 16);
           const leftEar = new THREE.Mesh(earGeom, brownMaterial);
-          leftEar.position.set(-0.06, 0.08, 0);
-          this.monkey.add(leftEar);
+          leftEar.position.set(-0.08, 0.08, 0);
+          leftEar.scale.set(0.5, 1, 1);
+          this.headPivot.add(leftEar);
           const rightEar = new THREE.Mesh(earGeom, brownMaterial);
-          rightEar.position.set(0.06, 0.08, 0);
-          this.monkey.add(rightEar);
+          rightEar.position.set(0.08, 0.08, 0);
+          rightEar.scale.set(0.5, 1, 1);
+          this.headPivot.add(rightEar);
 
-          // 身体
-          const body = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.08, 16), brownMaterial);
-          body.position.set(0, 0.02, 0);
-          this.monkey.add(body);
+          // 嘴巴（可动画）
+          this.mouth = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 16), blackMaterial);
+          this.mouth.position.set(0, 0.04, 0.09);
+          this.mouth.scale.set(1, 0.1, 1);
+          this.headPivot.add(this.mouth);
 
-          // 左臂枢纽 (用于旋转)
-          this.leftArmPivot = new THREE.Group();
-          this.leftArmPivot.position.set(-0.05, 0.05, 0);
-          const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.012, 0.08), brownMaterial);
-          leftArm.position.set(0, -0.04, 0); 
-          this.leftArmPivot.add(leftArm);
-          this.monkey.add(this.leftArmPivot);
+          this.puppet.add(this.headPivot);
 
-          // 右臂枢纽
-          this.rightArmPivot = new THREE.Group();
-          this.rightArmPivot.position.set(0.05, 0.05, 0);
-          const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.012, 0.08), brownMaterial);
-          rightArm.position.set(0, -0.04, 0);
-          this.rightArmPivot.add(rightArm);
-          this.monkey.add(this.rightArmPivot);
+          // ==================== 躯干 ====================
+          const torso = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.06, 0.07, 0.15, 16),
+            brownMaterial
+          );
+          torso.position.set(0, 0.1, 0);
+          this.puppet.add(torso);
 
-          // 嘴巴 (根据捏合距离缩放)
-          this.mouth = new THREE.Mesh(new THREE.SphereGeometry(0.015, 16, 16), blackMaterial);
-          this.mouth.position.set(0, 0.045, 0.075);
-          this.mouth.scale.set(1, 0.1, 1); // 默认闭合
-          this.monkey.add(this.mouth);
+          // ==================== 左臂 ====================
+          // 左肩关节
+          this.leftShoulderPivot = new THREE.Group();
+          this.leftShoulderPivot.position.set(-0.08, 0.15, 0);
+          
+          // 左上臂
+          const leftUpperArm = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.025, 0.02, 0.12, 12),
+            brownMaterial
+          );
+          leftUpperArm.position.set(0, -0.06, 0);
+          this.leftShoulderPivot.add(leftUpperArm);
 
-          // 在识别到手之前，先放置在视野正前方
-          this.monkey.position.set(0, 1.2, -1.0);
-          this.add(this.monkey);
+          // 左肘关节
+          this.leftElbowPivot = new THREE.Group();
+          this.leftElbowPivot.position.set(0, -0.12, 0);
+          
+          // 左前臂
+          const leftForearm = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.018, 0.015, 0.1, 12),
+            brownMaterial
+          );
+          leftForearm.position.set(0, -0.05, 0);
+          this.leftElbowPivot.add(leftForearm);
+
+          // 左手腕关节
+          this.leftWristPivot = new THREE.Group();
+          this.leftWristPivot.position.set(0, -0.1, 0);
+          
+          // 左手掌
+          const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12), lightBrownMaterial);
+          this.leftWristPivot.add(leftHand);
+          
+          this.leftElbowPivot.add(this.leftWristPivot);
+          this.leftShoulderPivot.add(this.leftElbowPivot);
+          this.puppet.add(this.leftShoulderPivot);
+
+          // ==================== 右臂 ====================
+          this.rightShoulderPivot = new THREE.Group();
+          this.rightShoulderPivot.position.set(0.08, 0.15, 0);
+          
+          const rightUpperArm = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.025, 0.02, 0.12, 12),
+            brownMaterial
+          );
+          rightUpperArm.position.set(0, -0.06, 0);
+          this.rightShoulderPivot.add(rightUpperArm);
+
+          this.rightElbowPivot = new THREE.Group();
+          this.rightElbowPivot.position.set(0, -0.12, 0);
+          
+          const rightForearm = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.018, 0.015, 0.1, 12),
+            brownMaterial
+          );
+          rightForearm.position.set(0, -0.05, 0);
+          this.rightElbowPivot.add(rightForearm);
+
+          this.rightWristPivot = new THREE.Group();
+          this.rightWristPivot.position.set(0, -0.1, 0);
+          
+          const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12), lightBrownMaterial);
+          this.rightWristPivot.add(rightHand);
+          
+          this.rightElbowPivot.add(this.rightWristPivot);
+          this.rightShoulderPivot.add(this.rightElbowPivot);
+          this.puppet.add(this.rightShoulderPivot);
+
+          // ==================== 左腿 ====================
+          // 左臀关节
+          this.leftHipPivot = new THREE.Group();
+          this.leftHipPivot.position.set(-0.04, 0.0, 0);
+          
+          // 左大腿
+          const leftThigh = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.03, 0.025, 0.14, 12),
+            brownMaterial
+          );
+          leftThigh.position.set(0, -0.07, 0);
+          this.leftHipPivot.add(leftThigh);
+
+          // 左膝关节
+          this.leftKneePivot = new THREE.Group();
+          this.leftKneePivot.position.set(0, -0.14, 0);
+          
+          // 左小腿
+          const leftCalf = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02, 0.015, 0.12, 12),
+            brownMaterial
+          );
+          leftCalf.position.set(0, -0.06, 0);
+          this.leftKneePivot.add(leftCalf);
+
+          // 左踝关节
+          this.leftAnklePivot = new THREE.Group();
+          this.leftAnklePivot.position.set(0, -0.12, 0);
+          
+          // 左脚
+          const leftFoot = new THREE.Mesh(
+            new THREE.BoxGeometry(0.03, 0.02, 0.06),
+            brownMaterial
+          );
+          leftFoot.position.set(0, -0.01, 0.02);
+          this.leftAnklePivot.add(leftFoot);
+          
+          this.leftKneePivot.add(this.leftAnklePivot);
+          this.leftHipPivot.add(this.leftKneePivot);
+          this.puppet.add(this.leftHipPivot);
+
+          // ==================== 右腿 ====================
+          this.rightHipPivot = new THREE.Group();
+          this.rightHipPivot.position.set(0.04, 0.0, 0);
+          
+          const rightThigh = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.03, 0.025, 0.14, 12),
+            brownMaterial
+          );
+          rightThigh.position.set(0, -0.07, 0);
+          this.rightHipPivot.add(rightThigh);
+
+          this.rightKneePivot = new THREE.Group();
+          this.rightKneePivot.position.set(0, -0.14, 0);
+          
+          const rightCalf = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02, 0.015, 0.12, 12),
+            brownMaterial
+          );
+          rightCalf.position.set(0, -0.06, 0);
+          this.rightKneePivot.add(rightCalf);
+
+          this.rightAnklePivot = new THREE.Group();
+          this.rightAnklePivot.position.set(0, -0.12, 0);
+          
+          const rightFoot = new THREE.Mesh(
+            new THREE.BoxGeometry(0.03, 0.02, 0.06),
+            brownMaterial
+          );
+          rightFoot.position.set(0, -0.01, 0.02);
+          this.rightAnklePivot.add(rightFoot);
+          
+          this.rightKneePivot.add(this.rightAnklePivot);
+          this.rightHipPivot.add(this.rightKneePivot);
+          this.puppet.add(this.rightHipPivot);
+
+          // 设置木偶初始位置
+          this.puppet.position.set(0, 1.2, -1.0);
+          this.add(this.puppet);
         }
 
         /**
-         * 调用 Gemini API 获取视觉分析，并让猴子"开口说话"
+         * 创建牵引控制器
+         * 包括牵引环和控制线
+         */
+        createPuppetController() {
+          // 牵引环材质
+          const ringMaterial = new THREE.MeshPhongMaterial({ 
+            color: 0xffd700,
+            emissive: 0x442200,
+            metalness: 0.8
+          });
+          
+          // 控制线材质
+          const lineMaterial = new THREE.LineBasicMaterial({ 
+            color: 0xffffff,
+            linewidth: 2
+          });
+
+          // 创建牵引环的函数
+          const createRing = (radius = 0.04) => {
+            const ringGeom = new THREE.TorusGeometry(radius, 0.005, 8, 32);
+            const ring = new THREE.Mesh(ringGeom, ringMaterial);
+            ring.userData.isGrabbable = true;
+            return ring;
+          };
+
+          // ==================== 头部牵引环 ====================
+          this.headRing = createRing();
+          this.headRing.position.set(0, 1.6, -1.0);
+          this.add(this.headRing);
+          
+          this.headLine = this.createControlLine(this.headRing, this.headPivot);
+          this.add(this.headLine);
+
+          // ==================== 左手牵引环 ====================
+          this.leftHandRing = createRing();
+          this.leftHandRing.position.set(-0.3, 1.4, -1.0);
+          this.add(this.leftHandRing);
+          
+          this.leftHandLine = this.createControlLine(this.leftHandRing, this.leftWristPivot);
+          this.add(this.leftHandLine);
+
+          // ==================== 右手牵引环 ====================
+          this.rightHandRing = createRing();
+          this.rightHandRing.position.set(0.3, 1.4, -1.0);
+          this.add(this.rightHandRing);
+          
+          this.rightHandLine = this.createControlLine(this.rightHandRing, this.rightWristPivot);
+          this.add(this.rightHandLine);
+
+          // ==================== 左脚牵引环 ====================
+          this.leftFootRing = createRing();
+          this.leftFootRing.position.set(-0.15, 0.8, -1.0);
+          this.add(this.leftFootRing);
+          
+          this.leftFootLine = this.createControlLine(this.leftFootRing, this.leftAnklePivot);
+          this.add(this.leftFootLine);
+
+          // ==================== 右脚牵引环 ====================
+          this.rightFootRing = createRing();
+          this.rightFootRing.position.set(0.15, 0.8, -1.0);
+          this.add(this.rightFootRing);
+          
+          this.rightFootLine = this.createControlLine(this.rightFootRing, this.rightAnklePivot);
+          this.add(this.rightFootLine);
+
+          // 存储所有牵引环
+          this.controlRings = [
+            this.headRing,
+            this.leftHandRing,
+            this.rightHandRing,
+            this.leftFootRing,
+            this.rightFootRing
+          ];
+        }
+
+        /**
+         * 创建控制线（连接牵引环和木偶部位）
+         */
+        createControlLine(ring, targetPart) {
+          const geometry = new THREE.BufferGeometry();
+          const positions = new Float32Array(6); // 2个点，每个点3个坐标
+          geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+          
+          const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ 
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.6
+          }));
+          
+          line.userData.ring = ring;
+          line.userData.targetPart = targetPart;
+          
+          return line;
+        }
+
+        /**
+         * 调用 Gemini API 获取视觉分析
          */
         async askMonkey() {
           const ai = xb.core.ai;
@@ -170,7 +417,6 @@
             const parts = [];
             let sawSomething = false;
 
-            // 如果设备相机可用，尝试抓取一帧画面
             if (camera) {
               try {
                 const snapshot = camera.getSnapshot({outputFormat: 'base64'});
@@ -187,8 +433,7 @@
             if (sawSomething) {
               parts.push({text: '你是一只调皮的木偶小猴子。请用幽默、可爱的语气（用"吱吱！"开头）用中文描述你在这张照片里看到了什么？如果没看到明显的物体，就随机讲个关于香蕉的冷笑话。控制在两句话以内。'});
             } else {
-              // 针对 Pico 等无法获取相机画面的设备的 Fallback 提示词
-              parts.push({text: '你是一只调皮的木偶小猴子。因为当前设备(如Pico)未开放网页相机权限，你看不到外面。请用"吱吱！"开头，幽默地吐槽一下你被蒙住了眼睛，然后讲个关于香蕉的冷笑话。控制在两句话内。'});
+              parts.push({text: '你是一只调皮的木偶小猴子。因为当前设备未开放网页相机权限，你看不到外面。请用"吱吱！"开头，幽默地吐槽一下你被蒙住了眼睛，然后讲个关于香蕉的冷笑话。控制在两句话内。'});
             }
 
             const response = await ai.query({
@@ -208,62 +453,197 @@
         }
 
         /**
-         * 渲染循环：实时追踪手部关节位置并更新木偶状态
+         * 更新控制线位置
+         */
+        updateControlLine(line) {
+          const ring = line.userData.ring;
+          const targetPart = line.userData.targetPart;
+          
+          // 获取牵引环的世界坐标
+          const ringWorldPos = new THREE.Vector3();
+          ring.getWorldPosition(ringWorldPos);
+          
+          // 获取目标部位的世界坐标
+          const targetWorldPos = new THREE.Vector3();
+          targetPart.getWorldPosition(targetWorldPos);
+          
+          // 更新线的顶点
+          const positions = line.geometry.attributes.position.array;
+          positions[0] = ringWorldPos.x;
+          positions[1] = ringWorldPos.y;
+          positions[2] = ringWorldPos.z;
+          positions[3] = targetWorldPos.x;
+          positions[4] = targetWorldPos.y;
+          positions[5] = targetWorldPos.z;
+          line.geometry.attributes.position.needsUpdate = true;
+        }
+
+        /**
+         * 根据牵引环位置更新木偶关节
+         */
+        updatePuppetJoints() {
+          // 头部：跟随头部牵引环
+          const headRingWorld = new THREE.Vector3();
+          this.headRing.getWorldPosition(headRingWorld);
+          const headTarget = new THREE.Vector3();
+          this.headPivot.getWorldPosition(headTarget);
+          
+          // 计算头部应该朝向的方向
+          const headDir = headRingWorld.clone().sub(headTarget).normalize();
+          if (headDir.length() > 0.01) {
+            // 简单的朝向控制
+            this.headPivot.lookAt(headRingWorld);
+          }
+
+          // 左手：牵引环移动时，手臂跟随
+          const leftHandWorld = new THREE.Vector3();
+          this.leftHandRing.getWorldPosition(leftHandWorld);
+          this.updateArmIK(this.leftShoulderPivot, this.leftElbowPivot, this.leftWristPivot, leftHandWorld);
+
+          // 右手
+          const rightHandWorld = new THREE.Vector3();
+          this.rightHandRing.getWorldPosition(rightHandWorld);
+          this.updateArmIK(this.rightShoulderPivot, this.rightElbowPivot, this.rightWristPivot, rightHandWorld);
+
+          // 左脚
+          const leftFootWorld = new THREE.Vector3();
+          this.leftFootRing.getWorldPosition(leftFootWorld);
+          this.updateLegIK(this.leftHipPivot, this.leftKneePivot, this.leftAnklePivot, leftFootWorld);
+
+          // 右脚
+          const rightFootWorld = new THREE.Vector3();
+          this.rightFootRing.getWorldPosition(rightFootWorld);
+          this.updateLegIK(this.rightHipPivot, this.rightKneePivot, this.rightAnklePivot, rightFootWorld);
+        }
+
+        /**
+         * 简化的手臂IK（逆向运动学）
+         */
+        updateArmIK(shoulder, elbow, wrist, targetPos) {
+          const shoulderWorld = new THREE.Vector3();
+          shoulder.getWorldPosition(shoulderWorld);
+          
+          // 计算从肩膀到目标的方向
+          const dir = targetPos.clone().sub(shoulderWorld);
+          const distance = dir.length();
+          
+          if (distance > 0.05) {
+            // 让肩膀朝向目标
+            shoulder.lookAt(targetPos);
+            shoulder.rotateX(Math.PI / 2);
+            
+            // 根据距离调整肘部弯曲
+            const maxReach = 0.22; // 上臂+前臂长度
+            const bendRatio = Math.min(1, distance / maxReach);
+            elbow.rotation.x = -bendRatio * Math.PI * 0.5;
+          }
+        }
+
+        /**
+         * 简化的腿部IK
+         */
+        updateLegIK(hip, knee, ankle, targetPos) {
+          const hipWorld = new THREE.Vector3();
+          hip.getWorldPosition(hipWorld);
+          
+          const dir = targetPos.clone().sub(hipWorld);
+          const distance = dir.length();
+          
+          if (distance > 0.05) {
+            hip.lookAt(targetPos);
+            hip.rotateX(Math.PI / 2);
+            
+            const maxReach = 0.26;
+            const bendRatio = Math.min(1, distance / maxReach);
+            knee.rotation.x = bendRatio * Math.PI * 0.3;
+          }
+        }
+
+        /**
+         * 渲染循环：处理手柄交互和木偶动画
          */
         update() {
-          const handsData = xb.user.hands;
-          
-          if (handsData && handsData.hands && handsData.hands.length > 0) {
-            // 优先使用右手，如果没有则使用左手
-            const puppetHand = handsData.hands.find(h => h.handedness === 'right') || handsData.hands[0];
-            const joints = puppetHand.joints;
+          // 更新控制线
+          this.updateControlLine(this.headLine);
+          this.updateControlLine(this.leftHandLine);
+          this.updateControlLine(this.rightHandLine);
+          this.updateControlLine(this.leftFootLine);
+          this.updateControlLine(this.rightFootLine);
 
-            if (joints['wrist'] && joints['index-finger-tip'] && joints['thumb-tip']) {
-              // 1. 将猴子位置绑定到手腕
-              this.monkey.position.copy(joints['wrist'].position);
-              this.monkey.quaternion.copy(joints['wrist'].quaternion);
-              
-              // 旋转猴子，使其在手背/手腕上直立
-              this.monkey.rotateX(-Math.PI / 2);
-              this.monkey.translateY(0.05);
+          // 更新木偶关节
+          this.updatePuppetJoints();
 
-              // 2. 计算大拇指指尖和食指指尖的距离
-              const thumbTip = joints['thumb-tip'].position;
-              const indexTip = joints['index-finger-tip'].position;
-              const pinchDistance = thumbTip.distanceTo(indexTip);
+          // 处理手柄交互
+          this.handleControllerInteraction();
 
-              // 将距离映射到 0.0 到 1.0 的张开比例 (大致 2cm 到 8cm 之间)
-              const openRatio = Math.max(0, Math.min(1, (pinchDistance - 0.02) / 0.06));
-
-              // 结合 AI 说话状态计算最终的张口大小
-              let finalOpenRatio = openRatio;
-              if (this.isMonkeyTalking) {
-                const time = (performance.now() - this.talkStartTime) / 100;
-                // 用正弦波模拟快速开合嘴巴的说话动作
-                finalOpenRatio = Math.max(openRatio, (Math.sin(time) + 1) / 2);
-              }
-
-              // 动画：手臂向上挥舞
-              const maxArmAngle = Math.PI * 0.7;
-              this.leftArmPivot.rotation.z = -openRatio * maxArmAngle;
-              this.rightArmPivot.rotation.z = openRatio * maxArmAngle;
-
-              // 动画：嘴巴张开
-              this.mouth.scale.set(1, 0.1 + (finalOpenRatio * 1.5), 1);
-            }
+          // 处理说话动画
+          if (this.isMonkeyTalking) {
+            const time = (performance.now() - this.talkStartTime) / 100;
+            const openRatio = (Math.sin(time) + 1) / 2;
+            this.mouth.scale.set(1, 0.1 + (openRatio * 1.5), 1);
           } else {
-            // 手部丢失时恢复默认状态
-            this.leftArmPivot.rotation.z = 0;
-            this.rightArmPivot.rotation.z = 0;
-            
-            // 即使没有追踪到手，只要小猴子在说话，也让它张嘴
-            let idleOpenRatio = 0;
-            if (this.isMonkeyTalking) {
-              const time = (performance.now() - this.talkStartTime) / 100;
-              idleOpenRatio = (Math.sin(time) + 1) / 2;
-            }
-            this.mouth.scale.set(1, 0.1 + (idleOpenRatio * 1.5), 1);
+            this.mouth.scale.set(1, 0.1, 1);
           }
+        }
+
+        /**
+         * 处理手柄抓取交互
+         */
+        handleControllerInteraction() {
+          const controllers = xb.user.controllers;
+          
+          if (!controllers || !controllers.controllers) {
+            return;
+          }
+
+          controllers.controllers.forEach((controller, index) => {
+            if (!controller || !controller.gamepad) return;
+
+            const gamepad = controller.gamepad;
+            const triggerPressed = gamepad.buttons[0] && gamepad.buttons[0].pressed;
+
+            // 获取手柄的世界位置
+            const controllerPos = new THREE.Vector3();
+            if (controller.ray) {
+              controller.ray.origin.toArray(controllerPos);
+            }
+
+            if (triggerPressed) {
+              // 如果还没抓取东西，尝试抓取
+              if (!this.grabbedRing) {
+                // 查找最近的牵引环
+                let nearestRing = null;
+                let nearestDistance = 0.15; // 抓取距离阈值
+
+                this.controlRings.forEach(ring => {
+                  const ringPos = new THREE.Vector3();
+                  ring.getWorldPosition(ringPos);
+                  const distance = controllerPos.distanceTo(ringPos);
+                  
+                  if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestRing = ring;
+                  }
+                });
+
+                if (nearestRing) {
+                  this.grabbedRing = nearestRing;
+                  this.grabbingHand = index;
+                  nearestRing.material.emissive.setHex(0x880000);
+                }
+              } else if (this.grabbingHand === index) {
+                // 已抓取，更新牵引环位置
+                this.grabbedRing.position.copy(controllerPos);
+              }
+            } else {
+              // 释放抓取
+              if (this.grabbedRing && this.grabbingHand === index) {
+                this.grabbedRing.material.emissive.setHex(0x442200);
+                this.grabbedRing = null;
+                this.grabbingHand = null;
+              }
+            }
+          });
         }
       }
 
@@ -276,51 +656,6 @@
             hasVideoInput = devices.some(device => device.kind === 'videoinput');
           }
 
-          // ============================================================
-          // 关键修复 3：拦截 navigator.xr.requestSession，
-          // 将 hand-tracking 从 requiredFeatures 移到 optionalFeatures
-          // ============================================================
-          // xrblocks 的 Core.init() 内部会在 hands.enabled=true 时
-          // 自动将 "hand-tracking" 添加到 requiredFeatures。
-          // 但 Pico 4 浏览器可能不支持 hand-tracking 作为 requiredFeature，
-          // 这会导致整个 XR session 创建失败（页面"没有反应"的根本原因之一）。
-          // 我们在框架层之下拦截 requestSession 调用，
-          // 将 hand-tracking 降级为 optionalFeature，这样即使设备不支持手部追踪，
-          // VR session 仍然可以正常创建，应用不会崩溃。
-          if (navigator.xr && navigator.xr.requestSession) {
-            const originalRequestSession = navigator.xr.requestSession.bind(navigator.xr);
-            navigator.xr.requestSession = async function(mode, options = {}) {
-              const requiredFeatures = options.requiredFeatures || [];
-              const optionalFeatures = options.optionalFeatures || [];
-
-              // 将 hand-tracking 从 required 移到 optional
-              const handTrackingIdx = requiredFeatures.indexOf('hand-tracking');
-              if (handTrackingIdx !== -1) {
-                requiredFeatures.splice(handTrackingIdx, 1);
-                if (!optionalFeatures.includes('hand-tracking')) {
-                  optionalFeatures.push('hand-tracking');
-                }
-                console.log('[Pico4 Fix] hand-tracking moved from requiredFeatures to optionalFeatures');
-              }
-
-              // 将 depth-sensing 也移到 optional（Pico 4 可能不支持）
-              const depthIdx = requiredFeatures.indexOf('depth-sensing');
-              if (depthIdx !== -1) {
-                requiredFeatures.splice(depthIdx, 1);
-                if (!optionalFeatures.includes('depth-sensing')) {
-                  optionalFeatures.push('depth-sensing');
-                }
-                console.log('[Pico4 Fix] depth-sensing moved from requiredFeatures to optionalFeatures');
-              }
-
-              return originalRequestSession(mode, {
-                ...options,
-                requiredFeatures,
-                optionalFeatures
-              });
-            };
-          }
-
           const options = new xb.Options();
           
           // 必须开启 UI 模块，SpatialPanel 才能正常工作
@@ -329,41 +664,28 @@
           // 启用 AI
           options.enableAI();
           
-          // 仅在检测到物理摄像头时开启相机模块，防止在 Pico 等头显上因无相机而导致 "Hardware not found" 崩溃
+          // 仅在检测到物理摄像头时开启相机模块
           if (hasVideoInput) {
             options.enableCamera(); 
           }
           
-          // ============================================================
-          // 关键修复 1：重新启用 XR Transitions 以提供 "Enter VR" 入口
-          // ============================================================
-          // 之前注释掉 enableXRTransitions() 是导致 Pico 4 无法进入 VR 的根本原因！
-          // 没有它，页面上不会渲染 "Enter VR" 按钮，用户点击后没有任何反应。
+          // 启用 XR Transitions 以提供 "Enter VR" 入口
           options.enableXRTransitions();
 
-          // ============================================================
-          // 关键修复 2：设置 VR 模式（而非默认的 AR 模式）
-          // ============================================================
-          // Pico 4 是纯 VR 头显，不支持 immersive-ar 模式。
-          // xrblocks 默认 xrSessionMode 为 'immersive-ar'，
-          // 必须改为 'immersive-vr'，否则 requestSession('immersive-ar') 会抛出
-          // "Requested mode is not supported" 错误。
+          // 设置 VR 模式
           options.enableVR();
 
-          // 启用手势追踪
-          // 即使 Pico 4 不支持 hand-tracking 作为 requiredFeature，
-          // 上面我们已经通过拦截 requestSession 将其降级为 optionalFeature，
-          // 所以这里仍然可以安全地启用。
-          options.enableHands();
-          options.hands.enabled = true;
-          options.hands.visualization = true;
+          // 启用手柄控制器（而不是手势追踪）
+          options.enableControllers();
+          options.controllers.enabled = true;
+          options.controllers.visualization = true;
 
           options.simulator.defaultMode = xb.SimulatorMode.POSE;
           
           xb.add(new PuppetMonkeyInteraction());
           await xb.init(options);
         } catch (error) {
-          // 如果依然失败，会在屏幕左上角打印红色错误信息，方便我们定位问题
+          // 如果失败，会在屏幕左上角打印红色错误信息
           const logDiv = document.getElementById('debug-log');
           logDiv.style.display = 'block';
           logDiv.innerText = '初始化失败: ' + error.message + '\n\nStack: ' + (error.stack || '');
@@ -375,4 +697,3 @@
     </script>
   </body>
 </html>
-
